@@ -1,0 +1,371 @@
+{
+  "name": "DocuAgent — WF2 Tanulási Loop",
+  "nodes": [
+    {
+      "id": "wf2-trigger",
+      "name": "⏰ Időzítő (30 perc)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        48,
+        304
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "wf2-get-stats",
+      "name": "📊 Backend Statisztikák",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        304
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/dashboard",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.DASHBOARD_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-get-rag",
+      "name": "🔎 RAG Statisztikák",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        480
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/rag-stats?days=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.DASHBOARD_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-merge",
+      "name": "🔀 Adatok Összefésülése",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        304
+      ],
+      "parameters": {
+        "jsCode": "\nconst dash = $('📊 Backend Statisztikák').first().json;\nconst rag  = $('🔎 RAG Statisztikák').first().json;\n\nconst kpis    = dash.kpis    || {};\nconst status  = dash.status_breakdown || {};\nconst alerts  = dash.alerts  || [];\nconst ragSum  = rag.summary  || {};\n\nconst total       = kpis.emails?.value         || 0;\nconst ai_answered = kpis.ai_answered?.value    || 0;\nconst needs_att   = kpis.needs_attention?.value|| 0;\nconst feedback    = kpis.feedback_total?.value || 0;\nconst avg_conf    = kpis.avg_confidence?.value || 0;\n\nconst rag_total   = ragSum.total_queries    || 0;\nconst rag_fallback= ragSum.fallback_count   || 0;\nconst rag_rate    = ragSum.fallback_rate_pct|| 0;\n\nconst auto_rate   = total > 0 ? Math.round(ai_answered / total * 100) : 0;\nconst needs_rate  = total > 0 ? Math.round(needs_att   / total * 100) : 0;\n\n// Riport szöveg\nconst lines = [\n  `*📊 DocuAgent — Tanulási Riport*`,\n  `_${new Date().toLocaleString('hu-HU')}_`,\n  ``,\n  `*Email feldolgozás (utolsó 7 nap):*`,\n  `• Összes email: ${total}`,\n  `• AI által megválaszolva: ${ai_answered} (${auto_rate}%)`,\n  `• Figyelmet igényel: ${needs_att} (${needs_rate}%)`,\n  `• Átlag konfidencia: ${avg_conf}%`,\n  `• Feedback korrekciók: ${feedback}`,\n  ``,\n  `*RAG lekérdezések (ma):*`,\n  `• Összes: ${rag_total}`,\n  `• Fallback (nem talált): ${rag_fallback} (${rag_rate}%)`,\n];\n\nif (alerts.length > 0) {\n  lines.push('');\n  lines.push('*⚠️ Figyelmeztetések:*');\n  alerts.forEach(a => lines.push(`• ${a.message.replace(/<[^>]*>/g,'')}`));\n}\n\n// Tanulási ajánlások\nlines.push('');\nlines.push('*🧠 Tanulási állapot:*');\nif (feedback === 0) {\n  lines.push('• Még nincs feedback korrekció — a rendszer az alap promptot használja');\n} else if (feedback < 5) {\n  lines.push(`• ${feedback} korrekció rögzítve — tanulás beindult`);\n} else {\n  lines.push(`• ${feedback} korrekció rögzítve — aktív tanulási mód`);\n}\n\nif (rag_rate > 50) {\n  lines.push(`• ⚠️ Magas fallback arány (${rag_rate}%) — érdemes több dokumentumot feltölteni`);\n}\nif (auto_rate < 50 && total > 10) {\n  lines.push(`• ⚠️ Alacsony auto-válasz arány (${auto_rate}%) — ellenőrizd a confidence threshold-ot`);\n}\nif (auto_rate >= 80) {\n  lines.push(`• ✅ Kiváló automatizáltság (${auto_rate}%)`);\n}\n\nreturn [{\n  json: {\n    report_text: lines.join('\\n'),\n    stats: { total, ai_answered, needs_att, feedback, avg_conf, auto_rate, rag_total, rag_fallback, rag_rate },\n    has_alerts: alerts.length > 0,\n    needs_attention: needs_att > 0 || rag_rate > 50\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "wf2-if-alert",
+      "name": "⚡ Van figyelmeztetés?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        720,
+        304
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-alert",
+              "leftValue": "={{ $json.needs_attention }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "or"
+        }
+      }
+    },
+    {
+      "id": "wf2-sheets-normal",
+      "name": "📊 Riport → Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        944,
+        480
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "=https://docs.google.com/spreadsheets/d/1O7m67MEd0MScOntUzUyJwhnXgeJA0sdSVE4C_awYVu8/edit",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "url"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Időpont": "={{ new Date().toISOString() }}",
+            "Összes email": "={{ $('🔀 Adatok Összefésülése').item.json.stats.total }}",
+            "AI megválaszolt": "={{ $('🔀 Adatok Összefésülése').item.json.stats.ai_answered }}",
+            "Auto arány %": "={{ $('🔀 Adatok Összefésülése').item.json.stats.auto_rate }}",
+            "Figyelmet igényel": "={{ $('🔀 Adatok Összefésülése').item.json.stats.needs_att }}",
+            "Feedback db": "={{ $('🔀 Adatok Összefésülése').item.json.stats.feedback }}",
+            "Avg konfidencia": "={{ $('🔀 Adatok Összefésülése').item.json.stats.avg_conf }}",
+            "RAG fallback %": "={{ $('🔀 Adatok Összefésülése').item.json.stats.rag_rate }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cAOPh4Cw14zWIgrP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "wf2-slack-alert",
+      "name": "🔔 Slack Riasztás",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        944,
+        160
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "text": "={{ $('🔀 Adatok Összefésülése').item.json.report_text }}",
+        "otherOptions": {}
+      }
+    },
+    {
+      "id": "wf2-ai-insights",
+      "name": "🧠 AI Insights Lekérés",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        944,
+        640
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "http://host.docker.internal:8000/api/ai-insights",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.DASHBOARD_API_KEY }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "wf2-process-insights",
+      "name": "💡 Insights Feldolgozás",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        640
+      ],
+      "parameters": {
+        "jsCode": "\nconst insights = $input.first().json.ai || {};\nconst problems = (insights.problems || []).join('\\n• ');\nconst trends   = (insights.trends   || []).join('\\n• ');\nconst recs     = (insights.recommendations || []).join('\\n• ');\n\nconst text = [\n  '*🤖 AI Insights — Heti összefoglaló*',\n  '',\n  '*Problémák:*',\n  problems ? `• ${problems}` : '• Nincs azonosított probléma',\n  '',\n  '*Trendek:*',\n  trends ? `• ${trends}` : '• Nincs azonosított trend',\n  '',\n  '*Javaslatok:*',\n  recs ? `• ${recs}` : '• Nincs javaslat',\n].join('\\n');\n\nreturn [{ json: { insights_text: text } }];\n"
+      }
+    },
+    {
+      "id": "wf2-slack-insights",
+      "name": "📢 Slack AI Insights",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        1392,
+        640
+      ],
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "text": "={{ $json.insights_text }}",
+        "otherOptions": {}
+      }
+    }
+  ],
+  "connections": {
+    "⏰ Időzítő (30 perc)": {
+      "main": [
+        [
+          {
+            "node": "📊 Backend Statisztikák",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🔎 RAG Statisztikák",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "🧠 AI Insights Lekérés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Backend Statisztikák": {
+      "main": [
+        [
+          {
+            "node": "🔀 Adatok Összefésülése",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 RAG Statisztikák": {
+      "main": [
+        [
+          {
+            "node": "🔀 Adatok Összefésülése",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "🔀 Adatok Összefésülése": {
+      "main": [
+        [
+          {
+            "node": "⚡ Van figyelmeztetés?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚡ Van figyelmeztetés?": {
+      "main": [
+        [
+          {
+            "node": "🔔 Slack Riasztás",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📊 Riport → Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔔 Slack Riasztás": {
+      "main": [
+        [
+          {
+            "node": "📊 Riport → Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 AI Insights Lekérés": {
+      "main": [
+        [
+          {
+            "node": "💡 Insights Feldolgozás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💡 Insights Feldolgozás": {
+      "main": [
+        [
+          {
+            "node": "📢 Slack AI Insights",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "wf2-v1",
+  "triggerCount": 0,
+  "tags": [
+    {
+      "id": "docuagent",
+      "name": "DocuAgent"
+    }
+  ]
+}

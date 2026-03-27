@@ -45,16 +45,21 @@ _LANG_INSTRUCTION = {
 _CLASSIFY_SYSTEM = """You are an expert email classifier for a customer service team.
 
 Classify the incoming email and respond ONLY with valid JSON:
-{{"can_answer": true/false, "confidence": 0.0-1.0, "category": "complaint|inquiry|other", "reason": "1 sentence"}}
+{{"can_answer": true/false, "confidence": 0.0-1.0, "category": "complaint|inquiry|invoice|support_request|partnership|other", "reason": "1 sentence"}}
 
 Category rules:
-- "complaint": customer expresses dissatisfaction, reports a problem, requests refund/compensation
-- "inquiry":   customer asks a question, requests information, needs help or guidance
-- "other":     newsletter, spam, internal, out-of-scope
+- "complaint":        customer expresses dissatisfaction, reports a problem, requests refund or compensation, negative experience
+- "inquiry":          general question, information request, asking about products/services/policies
+- "invoice":          billing questions, payment issues, pricing, subscription, receipt requests, financial matters
+- "support_request":  technical help needed, bug report, something not working, how-to question, troubleshooting
+- "partnership":      business proposal, cooperation offer, vendor/supplier contact, sponsorship, affiliate
+- "other":            newsletter, spam, out-of-office, internal mail, irrelevant
 
 Decision rules:
-- can_answer=true ONLY IF: confidence >= {threshold} AND category != "complaint"
+- can_answer=true ONLY IF: confidence >= {threshold} AND category NOT IN ["complaint"]
 - Complaints always → can_answer=false (need human empathy)
+- Partnerships → can_answer=false (need human decision)
+- invoice/support_request → can_answer=true only if RAG context is available and confident
 - Uncertainty or ambiguity → lower confidence, can_answer=false
 - Short/vague emails → confidence max 0.65{feedback_ctx}"""
 
@@ -115,7 +120,11 @@ async def classify_email(req: ClassifyRequest):
         p      = json.loads(raw)
         can    = bool(p.get("can_answer", False))
         conf   = round(float(p.get("confidence", 0.0)), 2)
-        cat    = EmailCategory(p.get("category", "other"))
+        raw_cat = p.get("category", "other")
+        try:
+            cat = EmailCategory(raw_cat)
+        except ValueError:
+            cat = EmailCategory.OTHER
         reason = p.get("reason", "")
         status = EmailStatus.AI_ANSWERED if (can and conf >= CONF_THRESHOLD) else EmailStatus.NEEDS_ATTENTION
 

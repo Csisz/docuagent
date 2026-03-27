@@ -1,0 +1,124 @@
+{
+  "name": "DocuAgent — Gmail Label Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gmail-label-sync",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        80
+      ],
+      "id": "cceaa2a9-c106-4261-aeed-d9e7d20bb2e1",
+      "name": "Webhook",
+      "webhookId": "gmail-label-sync"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.body.gmail_message_id }}",
+        "labelIds": "={{ [$json.body.new_status === 'NEEDS_ATTENTION' ? 'Label_296554457803877760' : $json.body.new_status === 'AI_ANSWERED' ? 'Label_6435060688726328504' : $json.body.new_status === 'CLOSED' ? 'Label_7941799397662838462' : ''] }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "784a682a-0352-42be-8486-bafa299b7ed6",
+      "name": "Add Label",
+      "webhookId": "3d6c8333-763f-46b8-8141-6e935b24eef4",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "removeLabels",
+        "messageId": "={{ $('Webhook').item.json.body.gmail_message_id }}",
+        "labelIds": "={{ [ $('Webhook').item.json.body.old_status === 'NEEDS_ATTENTION' ? 'Label_296554457803877760' : $('Webhook').item.json.body.old_status === 'AI_ANSWERED' ? 'Label_6435060688726328504' : $('Webhook').item.json.body.old_status === 'CLOSED' ? 'Label_7941799397662838462' : ''] }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        160
+      ],
+      "id": "3809fd55-d72d-4a81-abb6-0252d2b51e50",
+      "name": "Remove Old Label",
+      "webhookId": "62fc35e1-8677-459e-8558-17ef43b284a3",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"ok\" }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        80
+      ],
+      "id": "4a023376-bc9e-4c62-9453-df3a02cf9d03",
+      "name": "Respond"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Add Label",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Remove Old Label",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add Label": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "f69fd3ea-d69e-4692-9d25-d81726c63370",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8bafa9bdd0abfa809193773a3bf7283447413792ada4f07d6ba290a2f0c94165"
+  },
+  "id": "uswxInNU3UeJ9ER4",
+  "tags": []
+}

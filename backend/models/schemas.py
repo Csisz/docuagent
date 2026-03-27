@@ -21,9 +21,12 @@ class EmailStatus(str, Enum):
 
 
 class EmailCategory(str, Enum):
-    COMPLAINT  = "complaint"
-    INQUIRY    = "inquiry"
-    OTHER      = "other"
+    COMPLAINT        = "complaint"         # panasz, reklamáció, kártérítés
+    INQUIRY          = "inquiry"           # általános kérdés, érdeklődés
+    INVOICE          = "invoice"           # számlázás, díjak, fizetés
+    SUPPORT_REQUEST  = "support_request"   # technikai segítség, hibajelentés
+    PARTNERSHIP      = "partnership"       # együttműködés, üzleti ajánlat
+    OTHER            = "other"             # spam, belső, nem releváns
 
 
 # ── AI döntés (tipizált JSONB) ────────────────────────────────

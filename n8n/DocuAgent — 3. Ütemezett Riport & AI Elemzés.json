@@ -1,0 +1,343 @@
+{
+  "name": "DocuAgent — 3. Ütemezett Riport & AI Elemzés",
+  "nodes": [
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "otherOptions": {}
+      },
+      "id": "199baf69-9ad5-4c47-a79f-0982c014e144",
+      "name": "💬 Slack Riport Küldés",
+      "type": "n8n-nodes-base.slack",
+      "position": [
+        0,
+        192
+      ],
+      "typeVersion": 2,
+      "webhookId": "3f0b2c25-3725-4278-8a28-ae4546e0435d"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * 1"
+            }
+          ]
+        }
+      },
+      "id": "631eb205-a3d3-4179-8d73-e29c05e97dd4",
+      "name": "Heti Kiváltó (Hétfő 07:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        -1120,
+        144
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "=https://docs.google.com/spreadsheets/d/1XyvvUR0zGmAQk7L8joNl6T9hM2iJ_jIN9jmCoovH9vo/edit?gid=0#gid=0",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "email_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1XyvvUR0zGmAQk7L8joNl6T9hM2iJ_jIN9jmCoovH9vo/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "3d9854cd-9f0e-4f60-92fe-10c54b2342c5",
+      "name": "Email Log Olvasás",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        -864,
+        16
+      ],
+      "typeVersion": 4,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cAOPh4Cw14zWIgrP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Email statisztikák\nconst emails = $('Email Log Olvasás').all().map(i => i.json);\nconst docs = $('Dokumentum Log Olvasás').all().map(i => i.json);\n\n// Az elmúlt 7 nap\nconst weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);\nconst recentEmails = emails.filter(e => new Date(e['Időpont']) > weekAgo);\nconst recentDocs = docs.filter(d => new Date(d['Időpont']) > weekAgo);\n\n// Email kategória bontás\nconst complaints = recentEmails.filter(e => e['Kategória'] === 'complaint').length;\nconst inquiries = recentEmails.filter(e => e['Kategória'] === 'inquiry').length;\nconst urgent = recentEmails.filter(e => e['Sürgős'] === 'true' || e['Sürgős'] === true).length;\n\nconst summary = {\n  period: `${weekAgo.toLocaleDateString('hu-HU')} – ${new Date().toLocaleDateString('hu-HU')}`,\n  email: {\n    total: recentEmails.length,\n    complaints,\n    inquiries,\n    general: recentEmails.length - complaints - inquiries,\n    urgent\n  },\n  documents: {\n    total: recentDocs.length,\n    uploaders: [...new Set(recentDocs.map(d => d['Feltöltő']))].length\n  },\n  raw_email_sample: recentEmails.slice(0, 5).map(e => `${e['Tárgy']} (${e['Kategória']})`).join('\\n')\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "3bc20846-ecf6-4b9e-be83-32383f8f59e2",
+      "name": "Statisztika Aggregálás",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        -512,
+        144
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Te egy üzleti elemző asszisztens vagy. Heti aktivitási riportokat készítesz rövid, lényegre törő stílusban. A riport célja: a cégvezető 2 perc alatt értse meg, mi történt, mi figyelemreméltó, és mi a teendő. Használj emoji-kat a vizuális tagoláshoz. Írj magyarul.",
+              "role": "system"
+            },
+            {
+              "content": "Heti aktivitási adatok:\n\nIdőszak: {{$json.period}}\n\nEMAIL FORGALOM:\n- Összes kezelt email: {{$json.email.total}}\n- Panasz: {{$json.email.complaints}}\n- Érdeklődés: {{$json.email.inquiries}}\n- Általános: {{$json.email.general}}\n- Sürgős volt: {{$json.email.urgent}}\n\nDOKUMENTUM FELDOLGOZÁS:\n- Feldolgozott dokumentumok: {{$json.documents.total}}\n- Egyedi feltöltők száma: {{$json.documents.uploaders}}\n\nMinta emailek: {{$json.raw_email_sample}}\n\nKérlek készíts egy rövid (max 200 szavas) vezetői összefoglalót, amelyben:\n1. Kiemeled a legfontosabb trendeket\n2. Felhívod a figyelmet esetleges problémákra\n3. 2-3 konkrét javaslatot adsz a következő hétre"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7b7fc5d7-ca57-4832-8e0e-0530af3b857b",
+      "name": "AI Elemzés & Riport",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        -352,
+        144
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "wxfbpht6aBWt1xrW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "=huszarviktordev@gmail.com",
+        "subject": "=📊 Heti AI Aktivitási Riport — {{$now.format('yyyy. MM. dd.')}}",
+        "message": "=<h2>📊 Heti DocuAgent Riport</h2>\n\n<p><b>Időszak:</b>{{ $('Statisztika Aggregálás').item.json.period }}</p>\n\n<table border=\"1\" cellpadding=\"8\" style=\"border-collapse:collapse; width:100%\">\n  <tr style=\"background:#1F3864; color:white\">\n    <th>Metrika</th>\n    <th>Érték</th>\n  </tr>\n  <tr>\n    <td>📧 Kezelt emailek</td>\n    <td>{{ $('Statisztika Aggregálás').item.json.email.total }}</td>\n  </tr>\n  <tr style=\"background:#f2f2f2\">\n    <td>⚠️ Panaszok</td>\n    <td>{{ $('Statisztika Aggregálás').item.json.email.complaints }}</td>\n  </tr>\n  <tr>\n    <td>❓ Érdeklődések</td>\n    <td>{{ $('Statisztika Aggregálás').item.json.email.inquiries }}</td>\n  </tr>\n  <tr style=\"background:#f2f2f2\">\n    <td>🚨 Sürgős esetek</td>\n    <td>{{ $('Statisztika Aggregálás').item.json.email.urgent }}</td>\n  </tr>\n  <tr>\n    <td>📄 Feldolgozott dok.</td>\n    <td>{{ $('Statisztika Aggregálás').item.json.documents.total }}</td>\n  </tr>\n</table>\n\n<h3>🤖 AI Elemzés</h3>\n\n<div style=\"background:#f8f9fa; padding:16px; border-left:4px solid #2E75B6\">\n{{ $json.message.content }}\n</div>\n\n<hr>\n\n<small style=\"color:#888\">\nDocuAgent Automatikus Riport — {{$now.format('yyyy. MM. dd. HH:mm')}}\n</small>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "9b768c5f-541c-42af-baee-4adebdd81c17",
+      "name": "Riport Email Küldés",
+      "type": "n8n-nodes-base.gmail",
+      "position": [
+        0,
+        0
+      ],
+      "typeVersion": 2,
+      "webhookId": "637c8f06-1fe6-4a6f-bc29-4bc2b0f9c51c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "=https://docs.google.com/spreadsheets/d/1YCsOBeZEzUc7UCF0d6EzG8A7pxn8zg5jUEb1Dhs6JzQ/edit?gid=1878414903#gid=1878414903",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1878414903,
+          "mode": "list",
+          "cachedResultName": "document_log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1YCsOBeZEzUc7UCF0d6EzG8A7pxn8zg5jUEb1Dhs6JzQ/edit#gid=1878414903"
+        },
+        "options": {}
+      },
+      "id": "d24cfff7-56f9-4634-927e-ef4f9ba44175",
+      "name": "Dokumentum Log Olvasás",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        -864,
+        256
+      ],
+      "typeVersion": 4,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cAOPh4Cw14zWIgrP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -672,
+        144
+      ],
+      "id": "822a5d86-a063-4080-9e6b-2501d9db92ad",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "resource": "chatMessage",
+        "chatId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.microsoftTeams",
+      "typeVersion": 2,
+      "position": [
+        0,
+        400
+      ],
+      "id": "ed8ae6d0-075a-484d-95d2-0110aff45426",
+      "name": "Create chat message",
+      "webhookId": "cbcd96ab-05c0-441b-a203-88eab332799a"
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "guildId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        0,
+        608
+      ],
+      "id": "c26d2f27-da68-4c75-96d0-08999c5594e7",
+      "name": "Send a message",
+      "webhookId": "102baae9-7cde-4a7c-8169-162836e9a5de"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Heti Kiváltó (Hétfő 07:00)": {
+      "main": [
+        [
+          {
+            "node": "Email Log Olvasás",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Dokumentum Log Olvasás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Log Olvasás": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Statisztika Aggregálás": {
+      "main": [
+        [
+          {
+            "node": "AI Elemzés & Riport",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Elemzés & Riport": {
+      "main": [
+        [
+          {
+            "node": "Riport Email Küldés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dokumentum Log Olvasás": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Statisztika Aggregálás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "511eddcc-6f7b-426e-bd29-5fb9419ffe62",
+  "meta": {
+    "instanceId": "8bafa9bdd0abfa809193773a3bf7283447413792ada4f07d6ba290a2f0c94165"
+  },
+  "id": "ypJPmuYl6xWTJtTJ",
+  "tags": [
+    {
+      "updatedAt": "2026-03-24T20:04:00.154Z",
+      "createdAt": "2026-03-24T20:04:00.154Z",
+      "id": "GCsLlHXOR23mrg53",
+      "name": "Demo"
+    },
+    {
+      "updatedAt": "2026-03-24T20:04:29.009Z",
+      "createdAt": "2026-03-24T20:04:29.009Z",
+      "id": "nQr6pBDbC9GflDxH",
+      "name": "Riport"
+    },
+    {
+      "updatedAt": "2026-03-24T20:04:00.171Z",
+      "createdAt": "2026-03-24T20:04:00.171Z",
+      "id": "pnjxmyXyOz3KSFbA",
+      "name": "DocuAgent"
+    }
+  ]
+}

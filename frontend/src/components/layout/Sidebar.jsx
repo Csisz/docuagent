@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import clsx from 'clsx'
 import { useStore } from '../../store'
+import { getApiKey, setApiKey } from '../../services/api'
 
 const NAV = [
   {
@@ -32,6 +34,20 @@ const NAV = [
 
 export default function Sidebar() {
   const { mobileNavOpen, closeMobileNav, theme, toggleTheme, dashData } = useStore()
+  const [showApiModal, setShowApiModal] = useState(false)
+  const [apiKeyInput, setApiKeyInput]   = useState('')
+  const apiKeySet = !!getApiKey()
+
+  function openApiModal() {
+    setApiKeyInput(getApiKey())
+    setShowApiModal(true)
+  }
+
+  function saveApiKey() {
+    setApiKey(apiKeyInput.trim())
+    setShowApiModal(false)
+    window.location.reload()
+  }
   const company = dashData?.meta?.company || 'Agentify Kft.'
   const attCount = dashData?.status_breakdown?.NEEDS_ATTENTION || 0
   const totalCount = dashData?.kpis?.emails?.value || 0
@@ -111,6 +127,19 @@ export default function Sidebar() {
           ))}
         </nav>
 
+        {/* API Key */}
+        <div className="px-4 py-1.5 border-t border-white/7">
+          <button
+            onClick={openApiModal}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors duration-150 group"
+          >
+            <span className="text-[13px] w-4 text-center leading-none">🔑</span>
+            <span className="text-[12px] font-mono flex-1 text-left transition-colors" style={{color: apiKeySet ? '#4ade80' : 'rgba(255,255,255,0.35)'}}>
+              {apiKeySet ? 'Kulcs beállítva ✓' : 'API kulcs (nincs)'}
+            </span>
+          </button>
+        </div>
+
         {/* Theme toggle */}
         <div className="px-4 py-2.5 border-t border-white/7">
           <button
@@ -152,6 +181,56 @@ export default function Sidebar() {
         </div>
 
       </aside>
+      {/* API Key Modal */}
+      {showApiModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)'}}
+          onClick={() => setShowApiModal(false)}
+        >
+          <div
+            className="w-[400px] max-w-[90vw] rounded-xl p-6"
+            style={{background: '#0f172a', border: '1px solid rgba(255,255,255,0.12)'}}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-[15px] font-semibold text-white mb-1">API kulcs beállítása</div>
+            <div className="text-[12px] text-white/40 mb-4 font-mono">
+              Ha a backend DASHBOARD_API_KEY-vel fut, add meg itt.<br/>
+              Üresen hagyva az auth ki van kapcsolva.
+            </div>
+            <input
+              type="password"
+              placeholder="pl. a3f9c2..."
+              value={apiKeyInput}
+              onChange={e => setApiKeyInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveApiKey()}
+              autoFocus
+              className="w-full rounded-lg px-3 py-2.5 text-[13px] font-mono mb-4 outline-none"
+              style={{
+                background: 'rgba(255,255,255,0.06)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                color: '#e2e8f0',
+              }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowApiModal(false)}
+                className="px-4 py-2 rounded-lg text-[13px] text-white/50 hover:text-white/80 transition-colors"
+                style={{border: '1px solid rgba(255,255,255,0.1)'}}
+              >
+                Mégse
+              </button>
+              <button
+                onClick={saveApiKey}
+                className="px-4 py-2 rounded-lg text-[13px] font-medium text-white transition-colors"
+                style={{background: '#1a56db'}}
+              >
+                Mentés
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   )
 }

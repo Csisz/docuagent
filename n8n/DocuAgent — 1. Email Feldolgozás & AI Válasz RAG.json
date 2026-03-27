@@ -1,0 +1,1077 @@
+{
+  "name": "DocuAgent — 1. Email Feldolgozás & AI Válasz RAG",
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const subject = $json.Subject || '';\nconst from = $json.From || '';\nconst body = $json.text || $json.snippet || '';\n\nconst isComplaint = /panasz|probléma|nem működik|hibás|reklamáció/i.test(body + subject);\nconst isInquiry = /árajánlat|kérdés|érdeklődöm|információ/i.test(body + subject);\nconst isUrgent = /sürgős|azonnali|urgent|asap/i.test(body + subject);\n\nreturn {\n  json: {\n    subject,\n    from,\n    body: body.substring(0, 2000),\n    category: isComplaint ? 'complaint' : isInquiry ? 'inquiry' : 'general',\n    isUrgent,\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "3cd4ce89-0133-40a9-b5f3-8cc817f1da5a",
+      "name": "🔍 Email Kategorizálás",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        672,
+        96
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Te egy senior ügyfélszolgálati munkatárs vagy.\n\nA feladatod:\nVALÓDI választ írni egy konkrét emailre.\n\nNYELV: \n- Mindig ugyanazon a nyelven válaszolj, amelyen az email érkezett. Magyar emailre magyarul (magázva), angol emailre angolul, németre németül.\n\n\nFONTOS:\n- A válasz KÖTELEZŐEN reagáljon az email tartalmára\n- NE írj általános sablon szöveget\n- Ha a válasz nem tartalmaz konkrét utalást az emailre → hibás\n\nElvárások:\n- rövid (max 5 mondat)\n- konkrét\n- emberi hangvétel\n- tartalmazzon konkrét választ VAGY kérdést\n\nSTRICT TILTÁS:\n- \"köszönjük, hogy írt\"\n- \"örülünk, hogy megkeresett\"\n- általános ügyfélszolgálati sablon\n\nSZIGORÚ SZABÁLY:\n\n- CSAK olyan információt adhatsz, ami az emailben, a megadott kontextusban VAGY a dokumentumokban szerepel\n- TILOS feltételezni rendszer funkciókat (pl. menüpontok, UI)\n- Ha nincs konkrét információ:\n  → ne találj ki megoldást\n  → írd: utánanézünk és jelentkezünk\n- tegező forma (\"te\", \"neked\", \"nálad\")\n\nHa a válasz feltételezésen alapulna → NE írd le\n\nHa nem tudsz válaszolni:\n→ tegyél fel 1 konkrét kérdést\n\nKimenet:\ncsak az email szöveg",
+              "role": "system"
+            },
+            {
+              "content": "=Email:\n\nTárgy: {{ $('🔍 Email Kategorizálás').item.json.subject }}\n\nSzöveg: {{ $('🔍 Email Kategorizálás').item.json.body }}\n\nCímzett: {{ $json.customer_name }}\n\n{% if $('🔎 RAG Qdrant Lekérdezés').item.json.found %}RELEVÁNS DOKUMENTUM KONTEXTUS (használd elsősorban ezeket!):\n{{ $('🔎 RAG Qdrant Lekérdezés').item.json.answer }}\n\n{% else %}DOKUMENTUM KONTEXTUS: Nem található releváns dokumentum. Ha nem tudod a pontos választ, írd: \"Utánanézünk és hamarosan visszajelzünk.\"\n\n{% endif %}Feladat:\n1. Foglald össze 1 mondatban, mit akar a feladó (EZ CSAK BELSŐ, NE ÍRD KI)\n2. Írj egy konkrét választ\n\nA válasz:\n- reflektáljon a kérésre\n- ne legyen sablonos\n- legyen konkrét (pl. igen/nem/következő lépés)\n\nExtra kontextus:\n\nIntent: {{ $('Parse AI JSON').item.json.intent }}\nFelhasználó célja: {{ $('Parse AI JSON').item.json.customer_goal }}\n\nFONTOS:\n- A kimenet CSAK a válasz legyen\n- NE tartalmazza az összefoglalást\n- NE számozd\n\nA válasz:\n- konkrétan erre reagáljon\n- ne általános válasz legyen"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4ecd794f-5aad-4553-b96c-5129a1fef211",
+      "name": "🤖 AI Válasz Generálás",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        2272,
+        96
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "wxfbpht6aBWt1xrW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-needs-attention",
+              "leftValue": "={{ $('🔎 Classify - Backend').item.json.status }}",
+              "rightValue": "NEEDS_ATTENTION",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "cond-urgent",
+              "leftValue": "={{ $('🔍 Email Kategorizálás').item.json.isUrgent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "cdd7830c-ca41-4247-b657-41d3c9dff9c2",
+      "name": "⚡ Sürgős?",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        2848,
+        96
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "otherOptions": {}
+      },
+      "id": "76f4912e-6cc9-4b60-ae43-6cce8b7449b8",
+      "name": "🔔 Slack Értesítés (Sürgős)",
+      "type": "n8n-nodes-base.slack",
+      "position": [
+        4320,
+        0
+      ],
+      "typeVersion": 2,
+      "webhookId": "6581be6c-0172-4762-a4f7-ea16ff433de7"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "=https://docs.google.com/spreadsheets/d/1O7m67MEd0MScOntUzUyJwhnXgeJA0sdSVE4C_awYVu8/edit?gid=1460886026#gid=1460886026",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1460886026,
+          "mode": "list",
+          "cachedResultName": "Email Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1O7m67MEd0MScOntUzUyJwhnXgeJA0sdSVE4C_awYVu8/edit#gid=1460886026"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Időpont": "={{ new Date().toISOString() }}",
+            "Feladó": "={{ $('Get many messages').item.json.From }}",
+            "Tárgy": "={{ $('Get many messages').item.json.Subject }}",
+            "Kategória": "={{ $('🔍 Email Kategorizálás').item.json.category }}",
+            "Sürgős": "={{ $('🔍 Email Kategorizálás').item.json.isUrgent  ? 'Igen' : 'Nem' }}",
+            "Feladó neve": "={{ $('Get many messages').item.json.From.split('<')[0].trim() }}",
+            "AI Válasz (előnézet)": "={{ $('🤖 AI Válasz Generálás').item.json.message.content }}",
+            "Státusz": "Elküldve"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Időpont",
+              "displayName": "Időpont",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Feladó",
+              "displayName": "Feladó",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Feladó neve",
+              "displayName": "Feladó neve",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tárgy",
+              "displayName": "Tárgy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Kategória",
+              "displayName": "Kategória",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sürgős",
+              "displayName": "Sürgős",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI Válasz (előnézet)",
+              "displayName": "AI Válasz (előnézet)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Státusz",
+              "displayName": "Státusz",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ecc90f8a-2dda-469e-953a-10eb0f2c4f92",
+      "name": "📊 Naplózás Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        3648,
+        192
+      ],
+      "typeVersion": 4,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cAOPh4Cw14zWIgrP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/email-log",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $('Get a message').item.json.subject }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $('Get a message').item.json.from.text }}"
+            },
+            {
+              "name": "category",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.category }}"
+            },
+            {
+              "name": "urgent",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.isUrgent }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.body }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Get a message').item.json.id }}"
+            },
+            {
+              "name": "ai_reply",
+              "value": "={{ $('🤖 AI Válasz Generálás').item.json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3424,
+        192
+      ],
+      "id": "e13fb682-abee-4b6a-8751-9b4078266f9a",
+      "name": "Log to Dashboard - HTTP Request"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Get many messages').item.json.id }}",
+        "labelIds": [
+          "Label_6435060688726328504"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3872,
+        192
+      ],
+      "id": "ed6dd618-976c-4fa0-b726-f08180c04b55",
+      "name": "Add label to message",
+      "webhookId": "4b10f4a8-4617-4e2f-b63b-4a8173777e68",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "filters": {
+          "q": "is:unread -label:ai-answered",
+          "readStatus": "unread"
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        96
+      ],
+      "id": "588083c0-3cc8-465e-b154-84717d139b39",
+      "name": "Get many messages",
+      "webhookId": "07b6e2f9-5931-4361-bac2-823a90465238",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {}
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        96
+      ],
+      "id": "b14efdb5-3032-418c-a135-8bd174ca03d8",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Te egy email elemző AI vagy.\n\nFeladat:\nElemezd az emailt és add vissza strukturált formában.\n\nKimenet CSAK JSON:\n\n{\n  \"intent\": \"pl. számla kérés / upgrade kérdés / panasz / spam\",\n  \"customer_goal\": \"mit szeretne konkrétan a feladó\",\n  \"needs_reply\": true,\n  \"urgency\": \"low | medium | high\",\n  \"suggested_action\": \"mit kell tenni\"\n}\n\nFontos:\n- rövid, pontos\n- ne írj magyarázatot\n- csak JSON"
+            },
+            {
+              "content": "=Email tárgy:\n{{$json.subject}}\n\nEmail szöveg:\n{{ $('Get a message').item.json.text }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        896,
+        96
+      ],
+      "id": "4d7d7e02-8a84-4672-af40-d12ad85dc9f6",
+      "name": "Email Értelmezés (AI)",
+      "credentials": {
+        "openAiApi": {
+          "id": "wxfbpht6aBWt1xrW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const raw = item.json.output[0].content[0].text;\n  \n  try {\n    const parsed = JSON.parse(raw);\n    return {\n      json: {\n        ...item.json,\n        ...parsed\n      }\n    };\n  } catch (e) {\n    return {\n      json: {\n        ...item.json,\n        intent: \"error\",\n        customer_goal: \"parse_error\",\n        needs_reply: false,\n        urgency: \"low\",\n        suggested_action: \"manual_check\"\n      }\n    };\n  }\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        96
+      ],
+      "id": "eabcb107-2b38-44b1-b572-2cc2daaa3423",
+      "name": "Parse AI JSON"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Feladat:\nTaláld meg a feladó nevét az email szövegben.\n\nKimenet CSAK JSON:\n{\n  \"name\": \"teljes név vagy null\"\n}\n\nSzabályok:\n- ha nincs név → null\n- ne találj ki nevet\n- ne magyarázz"
+            },
+            {
+              "content": "={{ $('🔍 Email Kategorizálás').item.json.body }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1472,
+        96
+      ],
+      "id": "9e0ff6eb-1238-4502-81d9-9376402924df",
+      "name": "Név kinyerés (AI)",
+      "credentials": {
+        "openAiApi": {
+          "id": "wxfbpht6aBWt1xrW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.id }}",
+        "simple": false,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        96
+      ],
+      "id": "df6797a7-b04e-4bfb-a90f-7b634b08ece2",
+      "name": "Get a message",
+      "webhookId": "0e99465c-1abd-4853-b20b-15b5771f95e8",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.map(item => {\n  const raw = $input.first().json.output[0].content[0].text || item.json.output || item.json.text || item.json.name_raw;\n\n  let name = \"\";\n\n  try {\n    const parsed = JSON.parse(raw);\n    name = parsed.name || \"\";\n  } catch (e) {\n    name = \"\";\n  }\n\n  return {\n    json: {\n      ...item.json,\n      customer_name: name\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        96
+      ],
+      "id": "63f5e762-cc84-44be-a843-750d3c55cce3",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/rag/query",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $('Parse AI JSON').item.json.customer_goal }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2048,
+        96
+      ],
+      "id": "3928b661-c322-4b28-8664-9a893065bf7d",
+      "name": "🔎 RAG Qdrant Lekérdezés"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Get a message').item.json.id }}",
+        "message": "={{ $('🤖 AI Válasz Generálás').item.json.message.content }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3136,
+        192
+      ],
+      "id": "d1e3a02d-8023-4987-8e21-3e566b61bffb",
+      "name": "Reply to a message",
+      "webhookId": "ab5ba902-b5e4-4a47-8ed8-e22e0fb18d60",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/classify",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $('Get many messages').item.json.Subject }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.body }}"
+            },
+            {
+              "name": "sender",
+              "value": "={{ $('Get a message').item.json.from.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2624,
+        96
+      ],
+      "id": "5cfa78c7-197a-45ff-b940-c4dd02d8c7a3",
+      "name": "🔎 Classify - Backend"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4",
+          "mode": "list",
+          "cachedResultName": "GPT-4"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "Te egy ügyfélszolgálati asszisztens vagy.\nAz ügyfél sürgős vagy figyelmet igénylő üzenetet küldött.\n\nÍrj egy rövid, empatikus visszaigazoló emailt amely:\n- Elismeri hogy megkaptuk és prioritásként kezeljük az üzenetet\n- Közli hogy kollégánk hamarosan személyesen foglalkozik vele\n- Maximum 3 mondat\n- Ne ígérj konkrét határidőt\n- NE írj aláírást\n\nNYELV: Mindig ugyanazon a nyelven válaszolj amelyen az email érkezett. Magyar emailre magyarul, magázva.",
+              "role": "system"
+            },
+            {
+              "content": "=Tárgy: {{ $('🔍 Email Kategorizálás').item.json.subject }}\nSzöveg: {{ $('🔍 Email Kategorizálás').item.json.body }}\nÜgyfél neve: {{ $('Code in JavaScript').item.json.customer_name }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7a5d81c0-6a42-41f7-ac43-16d41def175b",
+      "name": "🚨 Sürgős Visszaigazolás",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "position": [
+        3072,
+        0
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "openAiApi": {
+          "id": "wxfbpht6aBWt1xrW",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $('Get a message').item.json.id }}",
+        "message": "={{ $('🚨 Sürgős Visszaigazolás').item.json.message.content }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        3424,
+        0
+      ],
+      "id": "79d26ac8-04e0-45ad-8706-03bec557b9d4",
+      "name": "📨 Sürgős Reply",
+      "webhookId": "32b1ddf7-3506-486b-818f-1af39d80d781",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/email-log",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "subject",
+              "value": "={{ $('Get a message').item.json.subject }}"
+            },
+            {
+              "name": "from",
+              "value": "={{ $('Get a message').item.json.from.text }}"
+            },
+            {
+              "name": "category",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.category }}"
+            },
+            {
+              "name": "urgent",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.isUrgent }}"
+            },
+            {
+              "name": "timestamp",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "body",
+              "value": "={{ $('🔍 Email Kategorizálás').item.json.body }}"
+            },
+            {
+              "name": "message_id",
+              "value": "={{ $('Get a message').item.json.id }}"
+            },
+            {
+              "name": "ai_reply",
+              "value": "={{ $('🚨 Sürgős Visszaigazolás').item.json.message.content }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        3648,
+        0
+      ],
+      "id": "c9aa201a-fb9f-4d18-b9a4-d92b83520910",
+      "name": "📋 Log to Dashboard (Sürgős)"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "=https://docs.google.com/spreadsheets/d/1O7m67MEd0MScOntUzUyJwhnXgeJA0sdSVE4C_awYVu8/edit?gid=1460886026#gid=1460886026",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1460886026,
+          "mode": "list",
+          "cachedResultName": "Email Log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1O7m67MEd0MScOntUzUyJwhnXgeJA0sdSVE4C_awYVu8/edit#gid=1460886026"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Időpont": "={{ new Date().toISOString() }}",
+            "Feladó": "={{ $('Get many messages').item.json.From }}",
+            "Tárgy": "={{ $('Get many messages').item.json.Subject }}",
+            "Kategória": "={{ $('🔍 Email Kategorizálás').item.json.category }}",
+            "Sürgős": "={{ $('🔍 Email Kategorizálás').item.json.isUrgent  ? 'Igen' : 'Nem' }}",
+            "Feladó neve": "={{ $('Get many messages').item.json.From.split('<')[0].trim() }}",
+            "AI Válasz (előnézet)": "={{ $('🚨 Sürgős Visszaigazolás').item.json.message.content }}",
+            "Státusz": "Sürgős - Visszaigazolva"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Időpont",
+              "displayName": "Időpont",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Feladó",
+              "displayName": "Feladó",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Feladó neve",
+              "displayName": "Feladó neve",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Tárgy",
+              "displayName": "Tárgy",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Kategória",
+              "displayName": "Kategória",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Sürgős",
+              "displayName": "Sürgős",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "AI Válasz (előnézet)",
+              "displayName": "AI Válasz (előnézet)",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Státusz",
+              "displayName": "Státusz",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "3bd83f13-86e5-47aa-8f01-75ba32104d72",
+      "name": "📊 Google Sheets (Sürgős)",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [
+        3872,
+        0
+      ],
+      "typeVersion": 4,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "cAOPh4Cw14zWIgrP",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Get many messages').item.json.id }}",
+        "labelIds": [
+          "Label_6435060688726328504",
+          "Label_296554457803877760"
+        ]
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        4096,
+        0
+      ],
+      "id": "5a74cba1-0abe-4adc-be33-5beb3f956a72",
+      "name": "🏷️ Add label (Sürgős)",
+      "webhookId": "773de2b7-e7c5-4f6b-bd1e-7b6773a4b793",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "tx8g8ChtbMKhNXoM",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Get a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a message": {
+      "main": [
+        [
+          {
+            "node": "🔍 Email Kategorizálás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Email Kategorizálás": {
+      "main": [
+        [
+          {
+            "node": "Email Értelmezés (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Értelmezés (AI)": {
+      "main": [
+        [
+          {
+            "node": "Parse AI JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI JSON": {
+      "main": [
+        [
+          {
+            "node": "Név kinyerés (AI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Név kinyerés (AI)": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "🔎 RAG Qdrant Lekérdezés",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 RAG Qdrant Lekérdezés": {
+      "main": [
+        [
+          {
+            "node": "🤖 AI Válasz Generálás",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🤖 AI Válasz Generálás": {
+      "main": [
+        [
+          {
+            "node": "🔎 Classify - Backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔎 Classify - Backend": {
+      "main": [
+        [
+          {
+            "node": "⚡ Sürgős?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚡ Sürgős?": {
+      "main": [
+        [
+          {
+            "node": "🚨 Sürgős Visszaigazolás",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reply to a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚨 Sürgős Visszaigazolás": {
+      "main": [
+        [
+          {
+            "node": "📨 Sürgős Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📨 Sürgős Reply": {
+      "main": [
+        [
+          {
+            "node": "📋 Log to Dashboard (Sürgős)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Log to Dashboard (Sürgős)": {
+      "main": [
+        [
+          {
+            "node": "📊 Google Sheets (Sürgős)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Google Sheets (Sürgős)": {
+      "main": [
+        [
+          {
+            "node": "🏷️ Add label (Sürgős)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🏷️ Add label (Sürgős)": {
+      "main": [
+        []
+      ]
+    },
+    "Reply to a message": {
+      "main": [
+        [
+          {
+            "node": "Log to Dashboard - HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Dashboard - HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "📊 Naplózás Google Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Naplózás Google Sheets": {
+      "main": [
+        [
+          {
+            "node": "Add label to message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "6bba8355-46f6-4155-b628-5fb7d2a5c1f4",
+  "meta": {
+    "instanceId": "8bafa9bdd0abfa809193773a3bf7283447413792ada4f07d6ba290a2f0c94165"
+  },
+  "id": "tiY0QRzsYdJOM2VA",
+  "tags": [
+    {
+      "updatedAt": "2026-03-24T20:04:00.154Z",
+      "createdAt": "2026-03-24T20:04:00.154Z",
+      "id": "GCsLlHXOR23mrg53",
+      "name": "Demo"
+    },
+    {
+      "updatedAt": "2026-03-24T20:04:00.163Z",
+      "createdAt": "2026-03-24T20:04:00.163Z",
+      "id": "atZUBgptWNphu5aU",
+      "name": "Email"
+    },
+    {
+      "updatedAt": "2026-03-24T20:04:00.171Z",
+      "createdAt": "2026-03-24T20:04:00.171Z",
+      "id": "pnjxmyXyOz3KSFbA",
+      "name": "DocuAgent"
+    }
+  ]
+}
