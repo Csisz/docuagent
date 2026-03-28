@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse
 
 from core.config import PORT, ALLOWED_ORIGINS, UPLOAD_DIR
 import db.database as database
-from routers import classify, emails, documents, dashboard
+from routers import classify, emails, documents, dashboard, sla
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +54,7 @@ app.include_router(classify.router)
 app.include_router(emails.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
+app.include_router(sla.router)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)

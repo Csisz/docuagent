@@ -40,10 +40,10 @@ async def insert_email(email_id: str, message_id: str, subject: str,
 
 async def update_email_classification(email_id: str, category: str,
                                        status: str, ai_decision: dict,
-                                       confidence: float):
+                                       confidence: float, urgent: bool = False):
     return await db.execute(
-        "UPDATE emails SET category=$1, status=$2, ai_decision=$3, confidence=$4 WHERE id=$5",
-        category, status, json.dumps(ai_decision), confidence, email_id
+        "UPDATE emails SET category=$1, status=$2, ai_decision=$3, confidence=$4, urgent=$5 WHERE id=$6",
+        category, status, json.dumps(ai_decision), confidence, urgent, email_id
     )
 
 
@@ -229,17 +229,57 @@ async def get_rag_stats(days: int = 7):
             GROUP BY day ORDER BY day DESC"""
     )
 
-async def get_dashboard_layout(user_key: str = "default"):
-    return await db.fetchrow(
-        "SELECT layout FROM dashboard_layout WHERE user_key=$1", user_key
+
+# ══════════════════════════════════════════════════════════════
+# SYSTEM CONFIG  (v3.4)
+# ══════════════════════════════════════════════════════════════
+
+async def get_config(key: str) -> Optional[str]:
+    row = await db.fetchrow("SELECT value FROM system_config WHERE key=$1", key)
+    return row["value"] if row else None
+
+
+async def set_config(key: str, value: str):
+    return await db.execute(
+        """INSERT INTO system_config (key, value, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=NOW()""",
+        key, value
     )
 
-async def upsert_dashboard_layout(user_key: str, layout: list):
-    import json as _json
-    await db.execute(
-        """INSERT INTO dashboard_layout(user_key, layout, updated_at)
-           VALUES ($1, $2, NOW())
-           ON CONFLICT (user_key)
-           DO UPDATE SET layout=$2, updated_at=NOW()""",
-        user_key, _json.dumps(layout)
+
+# ══════════════════════════════════════════════════════════════
+# SLA  (v3.4)
+# ══════════════════════════════════════════════════════════════
+
+async def get_sla_emails(warning_hours: float, breach_hours: float):
+    """Visszaadja a nyitott emaileket SLA státusszal."""
+    return await db.fetch(
+        """SELECT id, subject, sender, status, urgent, created_at,
+                  EXTRACT(EPOCH FROM (NOW() - created_at))/3600 AS age_hours
+           FROM emails
+           WHERE status IN ('NEW', 'NEEDS_ATTENTION')
+           ORDER BY created_at ASC"""
+    )
+
+
+async def get_sla_summary(warning_hours: float, breach_hours: float):
+    """SLA összesítő: ok / warning / breach számok."""
+    return await db.fetchrow(
+        """SELECT
+               COUNT(*) FILTER (
+                   WHERE status IN ('NEW','NEEDS_ATTENTION')
+                   AND EXTRACT(EPOCH FROM (NOW()-created_at))/3600 < $1
+               ) AS ok_count,
+               COUNT(*) FILTER (
+                   WHERE status IN ('NEW','NEEDS_ATTENTION')
+                   AND EXTRACT(EPOCH FROM (NOW()-created_at))/3600 >= $1
+                   AND EXTRACT(EPOCH FROM (NOW()-created_at))/3600 < $2
+               ) AS warning_count,
+               COUNT(*) FILTER (
+                   WHERE status IN ('NEW','NEEDS_ATTENTION')
+                   AND EXTRACT(EPOCH FROM (NOW()-created_at))/3600 >= $2
+               ) AS breach_count
+           FROM emails""",
+        warning_hours, breach_hours
     )

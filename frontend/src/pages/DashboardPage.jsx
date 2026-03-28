@@ -25,7 +25,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, BarController, LineElem
 let aiCache = null
 let aiCacheEmailCount = -1
 
-const DEFAULT_LAYOUT = ['kpi_cards','status_cards','roi_card','charts','ai_panel','bottom_row']
+const DEFAULT_LAYOUT = ['kpi_cards','status_cards','roi_card','sla_card','charts','ai_panel','bottom_row']
 const BLOCK_LABELS   = {
   kpi_cards:   'KPI kártyák',
   status_cards:'Státusz kártyák',
@@ -33,6 +33,7 @@ const BLOCK_LABELS   = {
   charts:      'Email aktivitás & Kategóriák',
   ai_panel:    'AI Elemzés',
   bottom_row:  'Aktivitás / Dokumentumok / Rendszer',
+  sla_card:    'SLA Monitor',
 }
 
 function SortableBlock({ id, anyDragging, children }) {
@@ -65,14 +66,20 @@ export default function DashboardPage() {
   const saveTimeout = useRef(null)
 
   useEffect(() => {
-    api.getDashboardLayout()
-      .then(res => { if (res?.layout?.length) setLayout(res.layout) })
-      .catch(() => {})
+    try {
+      const saved = localStorage.getItem('dashboard_layout')
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length) setLayout(parsed)
+      }
+    } catch {}
   }, [])
 
   const saveLayout = useCallback((nl) => {
     if (saveTimeout.current) clearTimeout(saveTimeout.current)
-    saveTimeout.current = setTimeout(() => api.saveDashboardLayout(nl).catch(()=>{}), 600)
+    saveTimeout.current = setTimeout(() => {
+      try { localStorage.setItem('dashboard_layout', JSON.stringify(nl)) } catch {}
+    }, 600)
   }, [])
 
   const sensors = useSensors(
@@ -124,6 +131,7 @@ export default function DashboardPage() {
       </div>
     ),
     ai_panel:  <AIPanel emailCount={d?.kpis?.emails?.value} />,
+    sla_card:  <SLACard />,
     bottom_row: (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
         <ActivityFeed items={d?.activity} />
@@ -173,6 +181,100 @@ export default function DashboardPage() {
     </div>
   )
 }
+
+function SLACard() {
+  const [summary, setSummary] = useState(null)
+  const [config, setConfig]   = useState({ warning_hours: 4, breach_hours: 24 })
+  const [saving, setSaving]   = useState(false)
+  const [saved, setSaved]     = useState(false)
+
+  useEffect(() => {
+    api.getSlaConfig().then(setConfig).catch(() => {})
+    api.getSlaSummary().then(setSummary).catch(() => {})
+    const iv = setInterval(() => api.getSlaSummary().then(setSummary).catch(() => {}), 30000)
+    return () => clearInterval(iv)
+  }, [])
+
+  async function handleSave() {
+    setSaving(true)
+    try {
+      await api.setSlaConfig(config)
+      const s = await api.getSlaSummary()
+      setSummary(s)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch {}
+    finally { setSaving(false) }
+  }
+
+  const sl = `w-full h-1 rounded-full appearance-none cursor-pointer bg-white/10
+    [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5
+    [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full
+    [&::-webkit-slider-thumb]:bg-[#ff7820] [&::-webkit-slider-thumb]:shadow-[0_0_6px_rgba(255,120,32,.6)]
+    [&::-moz-range-thumb]:w-3.5 [&::-moz-range-thumb]:h-3.5
+    [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-[#ff7820] [&::-moz-range-thumb]:border-none`
+
+  return (
+    <div className="glass-card">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-[13px] font-semibold">SLA Monitor</h3>
+          <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Válaszidő tracking — nyitott emailek</p>
+        </div>
+        <span className="text-[9.5px] font-bold font-mono px-2 py-1 rounded bg-blue-500/15 text-blue-400 border border-blue-400/20">⏱ ÉLŐBEN</span>
+      </div>
+
+      {/* Summary counters */}
+      <div className="flex gap-3 mb-5">
+        <div className="flex-1 bg-green-500/[.07] border border-green-400/15 rounded-xl px-4 py-3 text-center">
+          <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest mb-1">OK</div>
+          <div className="text-2xl font-bold text-green-400">{summary?.ok_count ?? '—'}</div>
+        </div>
+        <div className="flex-1 bg-amber-500/[.07] border border-amber-400/15 rounded-xl px-4 py-3 text-center">
+          <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest mb-1">Figyelmeztetés</div>
+          <div className="text-2xl font-bold text-amber-400">{summary?.warning_count ?? '—'}</div>
+        </div>
+        <div className="flex-1 bg-red-500/[.07] border border-red-400/15 rounded-xl px-4 py-3 text-center">
+          <div className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest mb-1">Lejárt</div>
+          <div className="text-2xl font-bold text-red-400">{summary?.breach_count ?? '—'}</div>
+        </div>
+      </div>
+
+      {/* Sliders */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+        <div>
+          <div className="flex justify-between mb-1.5">
+            <span className="text-[11px] text-zinc-400">Figyelmeztetés határidő</span>
+            <span className="text-[11px] font-mono text-amber-400">{config.warning_hours} óra</span>
+          </div>
+          <input type="range" min={1} max={23} step={1} value={config.warning_hours}
+            onChange={e => setConfig(c => ({ ...c, warning_hours: +e.target.value < c.breach_hours ? +e.target.value : c.warning_hours }))}
+            className={sl} />
+          <div className="flex justify-between text-[9px] text-zinc-600 font-mono mt-1"><span>1h</span><span>23h</span></div>
+        </div>
+        <div>
+          <div className="flex justify-between mb-1.5">
+            <span className="text-[11px] text-zinc-400">SLA megsértés határidő</span>
+            <span className="text-[11px] font-mono text-red-400">{config.breach_hours} óra</span>
+          </div>
+          <input type="range" min={2} max={72} step={1} value={config.breach_hours}
+            onChange={e => setConfig(c => ({ ...c, breach_hours: +e.target.value > c.warning_hours ? +e.target.value : c.breach_hours }))}
+            className={sl} />
+          <div className="flex justify-between text-[9px] text-zinc-600 font-mono mt-1"><span>2h</span><span>72h</span></div>
+        </div>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className="w-full text-[12px] font-mono py-2 rounded-lg bg-[#ff7820] hover:bg-[#e56a1a] disabled:opacity-50 text-white font-semibold transition-colors"
+      >
+        {saved ? '✓ Mentve' : saving ? 'Mentés…' : 'SLA határok mentése'}
+      </button>
+    </div>
+  )
+}
+
 
 function ROICard({ aiAnswered }) {
   const [hourlyRate, setHourlyRate]           = useState(5000)

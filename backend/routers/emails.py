@@ -66,28 +66,29 @@ async def update_status(
     await q.update_email_status(email_id, req.status.value)
 
     if old != req.status.value:
-        await q.insert_feedback(email_id, ai, req.status.value, req.note or "")
-        log.info(f"Status update + feedback: {email_id} {old} → {req.status.value}")
+        if req.status.value != "CLOSED":  # CLOSED nem tanít
+            await q.insert_feedback(email_id, ai, req.status.value, req.note or "")
+            log.info(f"Status update + feedback: {email_id} {old} → {req.status.value}")
 
-        if N8N_LABEL_WEBHOOK and row["message_id"]:
-            try:
-                async with httpx.AsyncClient(timeout=5) as c:
-                    await c.post(N8N_LABEL_WEBHOOK, json={
-                        "email_id":         email_id,
-                        "gmail_message_id": row["message_id"],
-                        "old_status":       old,
-                        "new_status":       req.status.value,
-                    })
-                log.info(f"n8n label webhook: {row['message_id']} → {req.status.value}")
-            except Exception as e:
-                log.warning(f"n8n label webhook failed: {e}")
+            if N8N_LABEL_WEBHOOK and row["message_id"]:
+                try:
+                    async with httpx.AsyncClient(timeout=5) as c:
+                        await c.post(N8N_LABEL_WEBHOOK, json={
+                            "email_id":         email_id,
+                            "gmail_message_id": row["message_id"],
+                            "old_status":       old,
+                            "new_status":       req.status.value,
+                        })
+                    log.info(f"n8n label webhook: {row['message_id']} → {req.status.value}")
+                except Exception as e:
+                    log.warning(f"n8n label webhook failed: {e}")
 
-    return {
-        "status":          "ok",
-        "email_id":        email_id,
-        "new_status":      req.status.value,
-        "learning_stored": old != req.status.value,
-    }
+        return {
+            "status":          "ok",
+            "email_id":        email_id,
+            "new_status":      req.status.value,
+            "learning_stored": old != req.status.value and req.status.value != "CLOSED",
+        }
 
 
 @router.delete("/emails/{email_id}")

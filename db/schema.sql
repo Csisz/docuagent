@@ -82,6 +82,20 @@ CREATE INDEX IF NOT EXISTS idx_rag_logs_email_id   ON rag_logs(email_id);
 CREATE INDEX IF NOT EXISTS idx_rag_logs_created_at ON rag_logs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rag_logs_fallback   ON rag_logs(fallback_used);
 
+-- ── system_config — kulcs-érték konfiguráció (v3.4) ──────────
+-- SLA határok, értesítési beállítások, stb.
+CREATE TABLE IF NOT EXISTS system_config (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Alapértelmezett SLA értékek
+INSERT INTO system_config (key, value) VALUES
+    ('sla_warning_hours', '4'),
+    ('sla_breach_hours',  '24')
+ON CONFLICT (key) DO NOTHING;
+
 -- ── auto-update updated_at trigger ───────────────────────────
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$

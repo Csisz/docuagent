@@ -1,24 +1,10 @@
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-// API kulcs localStorage-ból
-export function getApiKey()        { return localStorage.getItem('da-api-key') || '' }
-export function setApiKey(key)     { localStorage.setItem('da-api-key', key) }
-export function clearApiKey()      { localStorage.removeItem('da-api-key') }
-
-function authHeaders(extra = {}) {
-  const key = getApiKey()
-  return key ? { 'X-API-Key': key, ...extra } : extra
-}
-
 async function req(path, opts = {}) {
   const res = await fetch(`${BASE}${path}`, {
     ...opts,
     signal: opts.signal || AbortSignal.timeout(10000),
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-      ...opts.headers,
-    },
+    headers: { 'Content-Type': 'application/json', 'X-API-Key': getApiKey(), ...opts.headers },
   })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res.json()
@@ -29,7 +15,7 @@ export const api = {
   health:     ()          => req('/api/health'),
   aiInsights: ()          => req('/api/ai-insights', { signal: AbortSignal.timeout(20000) }),
 
-  emails: (status, limit = 50, offset = 0) => {
+  emails:     (status, limit = 50, offset = 0) => {
     const q = new URLSearchParams({ limit, offset, ...(status && { status }) })
     return req(`/api/emails?${q}`)
   },
@@ -44,29 +30,34 @@ export const api = {
     }),
 
   classify: (subject, body, sender = '') =>
-    req('/api/classify', {
+    req('/classify', {
       method: 'POST',
       body: JSON.stringify({ subject, body, sender }),
     }),
 
   feedback: (email_id, original_ai_decision, new_status, note = '') =>
-    req('/api/feedback', {
+    req('/feedback', {
       method: 'POST',
       body: JSON.stringify({ email_id, original_ai_decision, new_status, note }),
     }),
 
-  upload: (formData) =>
-    fetch(`${BASE}/api/upload`, {
-      method: 'POST',
-      body: formData,
-      headers: authHeaders(),
-      signal: AbortSignal.timeout(90000),
-    }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }),
+  getSlaConfig:  () => req('/api/sla/config'),
+  setSlaConfig:  (cfg) => req('/api/sla/config', { method: 'POST', body: JSON.stringify(cfg) }),
+  getSlaSummary: () => req('/api/sla/summary'),
+  getSlaStatus:  () => req('/api/sla/status'),
 
-  getDashboardLayout:  ()       => req('/api/dashboard/layout'),
-  saveDashboardLayout: (layout) => req('/api/dashboard/layout', {
-    method: 'POST',
-    body: JSON.stringify({ layout }),
-  }),
+  upload: (formData) =>
+    fetch(`${BASE}/api/upload`, { method: 'POST', body: formData, signal: AbortSignal.timeout(60000) })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }),
 }
 
+const API_KEY_STORAGE = 'docuagent_api_key'
+
+export function getApiKey() {
+  return localStorage.getItem(API_KEY_STORAGE) || ''
+}
+
+export function setApiKey(key) {
+  if (key) localStorage.setItem(API_KEY_STORAGE, key)
+  else localStorage.removeItem(API_KEY_STORAGE)
+}

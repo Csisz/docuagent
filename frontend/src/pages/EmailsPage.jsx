@@ -11,6 +11,38 @@ const FILTERS = [null, 'NEW', 'AI_ANSWERED', 'NEEDS_ATTENTION', 'CLOSED']
 const FILTER_LABELS = { null: 'Összes', NEW: 'NEW', AI_ANSWERED: 'AI_ANSWERED', NEEDS_ATTENTION: 'NEEDS_ATTENTION', CLOSED: 'CLOSED' }
 const STATUSES = ['NEW', 'AI_ANSWERED', 'NEEDS_ATTENTION', 'CLOSED']
 
+const SENTIMENT_CFG = {
+  angry:     { icon: '😠', label: 'Dühös',    cls: 'bg-red-500/15 text-red-400 border-red-400/25' },
+  neutral:   { icon: '😐', label: 'Semleges', cls: 'bg-zinc-500/10 text-zinc-500 border-zinc-500/20' },
+  satisfied: { icon: '😊', label: 'Elégedett',cls: 'bg-green-500/15 text-green-400 border-green-400/25' },
+}
+
+function SentimentBadge({ sentiment }) {
+  if (!sentiment || sentiment === 'neutral') return null
+  const cfg = SENTIMENT_CFG[sentiment] || SENTIMENT_CFG.neutral
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border ${cfg.cls}`}>
+      {cfg.icon} {cfg.label}
+    </span>
+  )
+}
+
+function SlaBadge({ createdAt, warningH, breachH }) {
+  if (!createdAt || !warningH) return null
+  const ageH = (Date.now() - new Date(createdAt).getTime()) / 3600000
+  if (ageH >= breachH) return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-red-500/15 text-red-400 border-red-400/25">
+      🔴 {ageH.toFixed(1)}h
+    </span>
+  )
+  if (ageH >= warningH) return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-400/25">
+      ⚠ {ageH.toFixed(1)}h
+    </span>
+  )
+  return null
+}
+
 export default function EmailsPage({ defaultFilter }) {
   const location = useLocation()
   const { emails, emailTotal, setEmails, updateEmailStatus, deleteEmail, theme } = useStore()
@@ -28,7 +60,12 @@ export default function EmailsPage({ defaultFilter }) {
   const [activeFilter, setActiveFilter] = useState(
     location.state?.filter ?? defaultFilter ?? null
   )
+  const [slaConfig, setSlaConfig] = useState({ warning_hours: null, breach_hours: null })
   const didMount = useRef(false)
+
+  useEffect(() => {
+    api.getSlaConfig().then(cfg => setSlaConfig(cfg)).catch(() => {})
+  }, [])
 
   useEffect(() => { loadEmails(activeFilter) }, []) // eslint-disable-line
 
@@ -247,6 +284,7 @@ export default function EmailsPage({ defaultFilter }) {
                     onStatusChange={handleStatusChange}
                     onDelete={handleDelete}
                     theme={theme}
+                    slaConfig={slaConfig}
                   />
                 ))
               }
@@ -267,7 +305,7 @@ export default function EmailsPage({ defaultFilter }) {
   )
 }
 
-function EmailRow({ email: e, expanded, selected, onToggle, onSelect, onStatusChange, onDelete, theme }) {
+function EmailRow({ email: e, expanded, selected, onToggle, onSelect, onStatusChange, onDelete, theme, slaConfig = {} }) {
   const isLight = theme === 'light'
   let aiD = {}
   try { aiD = typeof e.ai_decision === 'string' ? JSON.parse(e.ai_decision) : e.ai_decision || {} } catch {}
@@ -324,11 +362,15 @@ function EmailRow({ email: e, expanded, selected, onToggle, onSelect, onStatusCh
         </td>
 
         <td className="px-3 py-2.5 max-w-[200px]">
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {e.urgent && <span className="w-1.5 h-1.5 rounded-full bg-red-400 flex-shrink-0" />}
             <span className={clsx('font-medium truncate', isLight ? 'text-slate-800' : '')}>{e.subject || '(nincs tárgy)'}</span>
             {aiD.learned_override && (
               <span className="text-[9px] font-bold font-mono px-1.5 py-0.5 rounded bg-orange-500/10 text-orange-400 border border-orange-400/25 flex-shrink-0">🧠</span>
+            )}
+            <SentimentBadge sentiment={aiD.sentiment} />
+            {['NEW','NEEDS_ATTENTION'].includes(e.status) && (
+              <SlaBadge createdAt={e.created_at} warningH={slaConfig.warning_hours} breachH={slaConfig.breach_hours} />
             )}
           </div>
         </td>
